@@ -1,6 +1,6 @@
 const express = require("express");
 const mongoose = require("mongoose");
-const cors = require("cors");           // ← Giữ lại để dùng
+const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const dotenv = require("dotenv");
@@ -17,17 +17,32 @@ if (!process.env.SECRET_KEY) {
 
 const app = express();
 
-// Middleware logging (giữ lại để thấy log đẹp)
+// Middleware logging
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - ${req.ip}`);
   next();
 });
 
-// ĐÃ SỬA: MỞ HOÀN TOÀN CORS → CHO PHÉP VERCEL, LOCALHOST, ĐIỆN THOẠI, MỌI NƠI KẾT NỐI
-app.use(cors());
-console.log("CORS: ĐÃ MỞ HOÀN TOÀN → localhost + Vercel + mọi domain đều được phép!");
+// Cấu hình CORS trước mọi middleware khác
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",")
+  : ["http://localhost:3000"];
+app.use(cors({
+  origin: function (origin, callback) {
+    console.log("CORS check for origin:", origin);
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+  optionsSuccessStatus: 204,
+}));
 
-// Cấu hình Helmet (giữ nguyên bảo mật)
+// Cấu hình Helmet với các tùy chọn bảo mật nâng cao
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -42,7 +57,7 @@ app.use(helmet({
 
 app.use(express.json());
 
-// Rate limit riêng cho đăng nhập (giữ nguyên)
+// Rate limit riêng cho đăng nhập
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 phút
   max: 5,
@@ -50,15 +65,21 @@ const loginLimiter = rateLimit({
 });
 app.use("/api/auth/login", loginLimiter);
 
-// Rate limit chung (đã tăng max cho dev)
+// Rate limit chung (tăng max lên 1000 cho phát triển)
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 1000000000,
+  max: 1000000000, // Tăng từ 100 lên 1000
   message: "Quá nhiều yêu cầu, vui lòng thử lại sau 15 phút.",
 }));
 
-// XÓA HẾT ĐOẠN XỬ LÝ LỖI CORS CŨ (không cần nữa vì đã mở hoàn toàn)
-// (đoạn app.use((err, req, res, next) => { if (err.message === "Not allowed by CORS")... }) → XÓA HOẶC COMMENT
+// Middleware xử lý lỗi CORS
+app.use((err, req, res, next) => {
+  if (err.message === "Not allowed by CORS") {
+    console.error("CORS error:", err.message);
+    return res.status(403).json({ error: "Yêu cầu bị chặn do CORS không được phép." });
+  }
+  next(err);
+});
 
 const connectDB = async () => {
   try {
@@ -114,7 +135,7 @@ try {
   const authRouter = require("./src/routes/auth");
   const lampRouter = require("./src/routes/lamp");
   const scheduleRouter = require("./src/routes/schedule");
-  const activityLogRouter = require("./src/routes/activitylog");
+  const activityLogRouter = require("./src/routes/activitylog"); // Thêm route mới
 
   console.log("Auth router type:", typeof authRouter);
   console.log("Lamp router type:", typeof lampRouter);
@@ -133,13 +154,13 @@ try {
   app.use("/api/auth", authRouter);
   app.use("/api/lamp", lampRouter);
   app.use("/api/schedule", scheduleRouter);
-  app.use("/api/activitylog", activityLogRouter);
+  app.use("/api/activitylog", activityLogRouter); // Thêm route mới
 } catch (err) {
   console.error("Error loading routers:", err.message);
   process.exit(1);
 }
 
-// Middleware xử lý lỗi chung (giữ nguyên)
+// Middleware xử lý lỗi chung
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: "Có lỗi xảy ra trên server." });
