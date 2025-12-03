@@ -1,7 +1,6 @@
-// server.js (hoặc index.js) – FILE HOÀN CHỈNH ĐÃ FIX TẤT CẢ
 const express = require("express");
 const mongoose = require("mongoose");
-const cors = require("cors");
+const cors = require("cors");           // ← Giữ lại để dùng
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const dotenv = require("dotenv");
@@ -10,67 +9,64 @@ const User = require("./src/models/User");
 
 dotenv.config();
 
-// KIỂM TRA SECRET_KEY – BẮT BUỘC
+// Kiểm tra SECRET_KEY
 if (!process.env.SECRET_KEY) {
-  console.error("SECRET_KEY is not defined in environment variables!");
+  console.error("SECRET_KEY is not defined in environment variables");
   process.exit(1);
 }
 
 const app = express();
 
-// LOG MỖI REQUEST (rất hữu ích khi debug)
+// Middleware logging (giữ lại để thấy log đẹp)
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - ${req.ip}`);
   next();
 });
 
-// MỞ HOÀN TOÀN CORS – CHO PHÉP TẤT CẢ DOMAIN (localhost, Vercel, Render, điện thoại...)
-app.use(cors({
-  origin: true, // Cho phép mọi origin
-  credentials: true,
-}));
-console.log("CORS: ĐÃ MỞ HOÀN TOÀN → localhost, Vercel, Render, mobile... đều được!");
+// ĐÃ SỬA: MỞ HOÀN TOÀN CORS → CHO PHÉP VERCEL, LOCALHOST, ĐIỆN THOẠI, MỌI NƠI KẾT NỐI
+app.use(cors());
+console.log("CORS: ĐÃ MỞ HOÀN TOÀN → localhost + Vercel + mọi domain đều được phép!");
 
-// BẢO MẬT VỚI HELMET + CHO PHÉP data: (base64 avatar)
+// Cấu hình Helmet (giữ nguyên bảo mật)
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "blob:", "https:"],
-      fontSrc: ["'self'", "data:"],
+      imgSrc: ["'self'", "data:"],
     },
   },
+  xssFilter: true,
 }));
 
-// QUAN TRỌNG NHẤT: TĂNG GIỚI HẠN PAYLOAD ĐỂ GỬI ẢNH BASE64 LỚN
-app.use(express.json({ limit: "10mb" }));                    // Cho phép JSON lên tới 10MB
-app.use(express.urlencoded({ limit: "10mb", extended: true })); // Cho form-data nếu cần
+app.use(express.json());
 
-// RATE LIMIT RIÊNG CHO ĐĂNG NHẬP (chống brute force)
+// Rate limit riêng cho đăng nhập (giữ nguyên)
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 phút
-  max: 10,
-  message: { message: "Quá nhiều lần đăng nhập. Vui lòng thử lại sau 15 phút." },
+  max: 5,
+  message: "Quá nhiều yêu cầu đăng nhập, vui lòng thử lại sau 15 phút.",
 });
 app.use("/api/auth/login", loginLimiter);
 
-// RATE LIMIT CHUNG (tăng cao cho dev, production có thể giảm)
+// Rate limit chung (đã tăng max cho dev)
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 1000000,
-  message: { message: "Quá nhiều yêu cầu từ IP này. Thử lại sau 15 phút." },
+  max: 1000000000,
+  message: "Quá nhiều yêu cầu, vui lòng thử lại sau 15 phút.",
 }));
 
-// KẾT NỐI MONGODB
+// XÓA HẾT ĐOẠN XỬ LÝ LỖI CORS CŨ (không cần nữa vì đã mở hoàn toàn)
+// (đoạn app.use((err, req, res, next) => { if (err.message === "Not allowed by CORS")... }) → XÓA HOẶC COMMENT
+
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URL, {
+    await mongoose.connect(process.env.MONGO_URL || "mongodb://localhost:27017/lamp_control", {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });
-    console.log("MongoDB connected successfully!");
+    console.log("MongoDB connected");
     await createDefaultAdmin();
   } catch (err) {
     console.error("MongoDB connection error:", err.message);
@@ -78,10 +74,15 @@ const connectDB = async () => {
   }
 };
 
-// TẠO TÀI KHOẢN ADMIN MẶC ĐỊNH
 const createDefaultAdmin = async () => {
   try {
-    const adminExists = await User.findOne({ username: "admin" });
+    const adminExists = await User.findOne({
+      $or: [
+        { username: "admin" },
+        { email: "admin@example.com" },
+        { contact: "0123456789" },
+      ],
+    });
     if (!adminExists) {
       const hashedPassword = await bcrypt.hash("admin123", 10);
       const admin = new User({
@@ -92,64 +93,57 @@ const createDefaultAdmin = async () => {
         lastName: "Hướng",
         email: "admin@example.com",
         contact: "0123456789",
-        address1: "Hà Nội, Việt Nam",
-        avatar: null,
+        address1: "Default Address",
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
       await admin.save();
-      console.log("Default admin created → username: admin | password: admin123");
+      console.log("Default admin account created: username=admin, password=admin123");
     } else {
       console.log("Admin account already exists");
     }
   } catch (err) {
-    console.error("Error creating default admin:", err.message);
+    console.error("Error creating default admin account:", err.message);
   }
 };
 
 connectDB();
 
-// IMPORT VÀ SỬ DỤNG ROUTES
+// Kiểm tra và log các router
 try {
   const authRouter = require("./src/routes/auth");
   const lampRouter = require("./src/routes/lamp");
   const scheduleRouter = require("./src/routes/schedule");
   const activityLogRouter = require("./src/routes/activitylog");
 
+  console.log("Auth router type:", typeof authRouter);
+  console.log("Lamp router type:", typeof lampRouter);
+  console.log("Schedule router type:", typeof scheduleRouter);
+  console.log("ActivityLog router type:", typeof activityLogRouter);
+
+  if (
+    typeof authRouter !== "function" ||
+    typeof lampRouter !== "function" ||
+    typeof scheduleRouter !== "function" ||
+    typeof activityLogRouter !== "function"
+  ) {
+    throw new Error("One or more routers are not functions");
+  }
+
   app.use("/api/auth", authRouter);
   app.use("/api/lamp", lampRouter);
   app.use("/api/schedule", scheduleRouter);
   app.use("/api/activitylog", activityLogRouter);
-
-  console.log("All routes loaded successfully!");
 } catch (err) {
-  console.error("Error loading routes:", err.message);
+  console.error("Error loading routers:", err.message);
   process.exit(1);
 }
 
-// TRANG CHỦ ĐỂ TEST SERVER SỐNG
-app.get("/", (req, res) => {
-  res.json({
-    message: "Backend Admin Panel đang chạy mượt mà!",
-    version: "1.0.0",
-    time: new Date().toISOString(),
-  });
-});
-
-// XỬ LÝ LỖI 404
-app.use((req, res) => {
-  res.status(404).json({ message: "Route không tồn tại!" });
-});
-
-// XỬ LÝ LỖI CHUNG
+// Middleware xử lý lỗi chung (giữ nguyên)
 app.use((err, req, res, next) => {
-  console.error("Server Error:", err.stack);
-  res.status(500).json({ message: "Có lỗi xảy ra trên server!", error: err.message });
+  console.error(err.stack);
+  res.status(500).json({ error: "Có lỗi xảy ra trên server." });
 });
 
-// KHỞI ĐỘNG SERVER
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server đang chạy trên port ${PORT}`);
-  console.log(`http://localhost:${PORT}`);
-  console.log(`Deploy: https://your-backend.onrender.com`);
-  console.log("CHÚC BẠN THÀNH CÔNG!");
-});
+app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
