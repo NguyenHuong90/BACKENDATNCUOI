@@ -1,85 +1,62 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const User = require("../models/User");
-const ActivityLog = require("../models/ActivityLog");
-const jwt = require("jsonwebtoken");
-const bcrypt = require("bcryptjs");
-const crypto = require("crypto");
-const sendEmail = require("../utils/mailer");
-
-/* ================= MIDDLEWARE ================= */
+const User = require('../models/User');
+const ActivityLog = require('../models/ActivityLog');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 
 const verifyToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({ message: "Không có token" });
-
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ message: 'Không có token được cung cấp' });
   try {
     const decoded = jwt.verify(token, process.env.SECRET_KEY);
     req.user = decoded;
     next();
-  } catch {
-    res.status(401).json({ message: "Token không hợp lệ" });
+  } catch (err) {
+    res.status(401).json({ message: 'Token không hợp lệ' });
   }
 };
 
-/* ================= VERIFY TOKEN ================= */
-
-router.get("/verify", verifyToken, (req, res) => {
-  res.json({ message: "Token hợp lệ", userId: req.user.id, role: req.user.role });
+// Route để kiểm tra token
+router.get('/verify', verifyToken, (req, res) => {
+  res.json({ message: 'Token hợp lệ', userId: req.user.id, role: req.user.role });
 });
 
-/* ================= REFRESH TOKEN ================= */
-
-router.post("/refresh", (req, res) => {
-  const { refreshToken } = req.body;
-  if (!refreshToken) return res.status(401).json({ message: "Không có refresh token" });
+// Route để refresh token
+router.post('/refresh', (req, res) => {
+  const refreshToken = req.body.refreshToken;
+  if (!refreshToken) return res.status(401).json({ message: 'Không có refresh token' });
 
   try {
-    const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET_KEY);
-    const newToken = jwt.sign(
-      { id: decoded.id, role: decoded.role },
-      process.env.SECRET_KEY,
-      { expiresIn: "1h" }
-    );
+    const decoded = jwt.verify(refreshToken, process.env.SECRET_KEY);
+    const newToken = jwt.sign({ id: decoded.id, role: decoded.role }, process.env.SECRET_KEY, { expiresIn: '1h' });
     res.json({ token: newToken });
-  } catch {
-    res.status(401).json({ message: "Refresh token không hợp lệ" });
+  } catch (err) {
+    res.status(401).json({ message: 'Refresh token không hợp lệ' });
   }
 });
 
-/* ================= LOGIN ================= */
-
-router.post("/login", async (req, res) => {
+// Route để đăng nhập
+router.post('/login', async (req, res) => {
+  console.log("Login request received:", req.body);
   const { username, password } = req.body;
-
   try {
     const user = await User.findOne({ username });
-    if (!user) return res.status(401).json({ message: "Sai tài khoản hoặc mật khẩu" });
-
-    if (!user.isVerified) {
-      return res.status(403).json({ message: "Email chưa được xác nhận" });
+    console.log("User found:", user ? user.username : null);
+    if (!user || !await bcrypt.compare(password, user.password)) {
+      console.log("Invalid credentials for:", username);
+      return res.status(401).json({ message: 'Thông tin đăng nhập không hợp lệ' });
     }
 
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ message: "Sai tài khoản hoặc mật khẩu" });
+    const token = jwt.sign({ id: user._id, role: user.role }, process.env.SECRET_KEY, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ id: user._id, role: user.role }, process.env.SECRET_KEY, { expiresIn: '7d' });
 
-    const token = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.SECRET_KEY,
-      { expiresIn: "1h" }
-    );
-
-    const refreshToken = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.REFRESH_SECRET_KEY,
-      { expiresIn: "7d" }
-    );
-
-    await ActivityLog.create({
+    await new ActivityLog({
       userId: user._id,
-      action: "login",
+      action: 'login',
       ip: req.ip,
-    });
+      timestamp: new Date(),
+    }).save();
 
     res.json({
       token,
@@ -96,33 +73,34 @@ router.post("/login", async (req, res) => {
       },
     });
   } catch (err) {
+    console.error('Lỗi khi đăng nhập:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-/* ================= REGISTER (ADMIN) ================= */
-
-router.post("/register", verifyToken, async (req, res) => {
+// Route để tạo người dùng mới
+router.post('/register', verifyToken, async (req, res) => {
   const { username, password, firstName, lastName, email, contact, address1, role } = req.body;
 
   if (!username || !password || !firstName || !lastName || !email || !contact || !address1 || !role) {
-    return res.status(400).json({ message: "Thiếu thông tin" });
-  }
-
-  if (req.user.role !== "admin") {
-    return res.status(403).json({ message: "Chỉ admin mới có quyền tạo user" });
+    return res.status(400).json({ message: 'Tất cả các trường đều bắt buộc' });
   }
 
   try {
-    const exists = await User.findOne({
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Chỉ admin mới có quyền tạo người dùng' });
+    }
+
+    const existingUser = await User.findOne({
       $or: [{ username }, { email }, { contact }],
     });
-    if (exists) return res.status(400).json({ message: "User đã tồn tại" });
+    if (existingUser) {
+      return res.status(400).json({ message: 'Username, email hoặc số điện thoại đã tồn tại' });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const verificationToken = crypto.randomBytes(32).toString("hex");
 
-    const newUser = await User.create({
+    const newUser = new User({
       username,
       password: hashedPassword,
       firstName,
@@ -131,125 +109,134 @@ router.post("/register", verifyToken, async (req, res) => {
       contact,
       address1,
       role,
-      isVerified: false,
-      verificationToken,
-      verificationTokenExpire: Date.now() + 15 * 60 * 1000,
     });
 
-    const verifyLink = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+    const savedUser = await newUser.save();
 
-    await sendEmail({
-      to: email,
-      subject: "Xác nhận email",
-      html: `
-        <p>Chào ${firstName},</p>
-        <p>Vui lòng xác nhận email của bạn:</p>
-        <a href="${verifyLink}">Xác nhận email</a>
-      `,
-    });
-
-    await ActivityLog.create({
+    await new ActivityLog({
       userId: req.user.id,
-      action: "create_user",
-      details: { username, role },
+      action: 'create_user',
+      details: { username: newUser.username, role: newUser.role },
       ip: req.ip,
-    });
+      timestamp: new Date(),
+    }).save();
 
-    res.status(201).json({
-      message: "Tạo user thành công. Email xác nhận đã được gửi.",
-      user: newUser,
-    });
+    res.status(201).json({ message: 'Người dùng đã được tạo thành công', user: savedUser });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Lỗi khi tạo người dùng:', err);
+    res.status(500).json({ message: 'Không thể tạo người dùng!', error: err.message });
   }
 });
 
-/* ================= VERIFY EMAIL ================= */
-
-router.get("/verify-email", async (req, res) => {
-  const { token } = req.query;
-
-  const user = await User.findOne({
-    verificationToken: token,
-    verificationTokenExpire: { $gt: Date.now() },
-  });
-
-  if (!user) {
-    return res.status(400).json({ message: "Link không hợp lệ hoặc đã hết hạn" });
-  }
-
-  user.isVerified = true;
-  user.verificationToken = null;
-  user.verificationTokenExpire = null;
-  await user.save();
-
-  res.json({ message: "Xác nhận email thành công" });
-});
-
-/* ================= USERS CRUD (GIỮ NGUYÊN) ================= */
-
-// lấy danh sách
-router.get("/users", verifyToken, async (req, res) => {
+// Route để lấy danh sách người dùng
+router.get('/users', verifyToken, async (req, res) => {
   try {
     const { search, role, page = 1, limit = 10 } = req.query;
     const query = {};
 
     if (search) {
       query.$or = [
-        { username: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-        { firstName: { $regex: search, $options: "i" } },
-        { lastName: { $regex: search, $options: "i" } },
+        { username: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
       ];
     }
 
-    if (role && role !== "all") query.role = role;
+    if (role && role !== 'all') {
+      query.role = role;
+    }
 
     const users = await User.find(query)
-      .select("username role firstName lastName email contact address1")
+      .select('username role firstName lastName email contact address1')
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
-
     const totalUsers = await User.countDocuments(query);
-    res.json({ users, totalPages: Math.ceil(totalUsers / limit) });
+    const totalPages = Math.ceil(totalUsers / limit);
+
+    res.json({ users, totalPages });
   } catch (err) {
+    console.error('Lỗi khi lấy danh sách người dùng:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// update
-router.put("/users/:id", verifyToken, async (req, res) => {
+// Route để cập nhật thông tin người dùng
+router.put('/users/:id', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const { firstName, lastName, email, contact, address1, role } = req.body;
+
+  if (!firstName || !lastName || !email || !contact || !address1 || !role) {
+    return res.status(400).json({ message: 'Tất cả các trường đều bắt buộc' });
+  }
+
   try {
-    if (req.user.role !== "admin") {
-      return res.status(403).json({ message: "Chỉ admin được sửa" });
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Chỉ admin mới có quyền sửa người dùng' });
     }
 
-    const user = await User.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!user) return res.status(404).json({ message: "User không tồn tại" });
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: 'Người dùng không tồn tại' });
+    }
 
-    res.json({ message: "Cập nhật thành công", user });
+    user.firstName = firstName;
+    user.lastName = lastName;
+    user.email = email;
+    user.contact = contact;
+    user.address1 = address1;
+    user.role = role;
+    user.updatedAt = new Date();
+
+    const updatedUser = await user.save();
+
+    await new ActivityLog({
+      userId: req.user.id,
+      action: 'update_user',
+      details: { username: updatedUser.username, role: updatedUser.role },
+      ip: req.ip,
+      timestamp: new Date(),
+    }).save();
+
+    res.json({ message: 'Người dùng đã được cập nhật thành công', user: updatedUser });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Lỗi khi cập nhật người dùng:', err);
+    res.status(500).json({ message: 'Không thể cập nhật người dùng!', error: err.message });
   }
 });
 
-// delete
-router.delete("/users/:id", verifyToken, async (req, res) => {
+// Route để xóa người dùng
+router.delete('/users/:id', verifyToken, async (req, res) => {
+  const { id } = req.params;
+
   try {
-    if (req.user.role !== "admin") {
-      return res.status(403).json({ message: "Chỉ admin được xóa" });
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Chỉ admin mới có quyền xóa người dùng' });
     }
 
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ message: "User không tồn tại" });
-    if (user.role === "admin") {
-      return res.status(403).json({ message: "Không thể xóa admin" });
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: 'Người dùng không tồn tại' });
     }
 
-    await User.findByIdAndDelete(req.params.id);
-    res.json({ message: "Xóa user thành công" });
+    if (user.role === 'admin') {
+      return res.status(403).json({ message: 'Không thể xóa tài khoản admin' });
+    }
+
+    await User.findByIdAndDelete(id);
+
+    await new ActivityLog({
+      userId: req.user.id,
+      action: 'delete_user',
+      details: { username: user.username, role: user.role },
+      ip: req.ip,
+      timestamp: new Date(),
+    }).save();
+
+    res.json({ message: 'Người dùng đã được xóa thành công' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Lỗi khi xóa người dùng:', err);
+    res.status(500).json({ message: 'Không thể xóa người dùng!', error: err.message });
   }
 });
 
