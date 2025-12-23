@@ -4,6 +4,7 @@ const User = require('../models/User');
 const ActivityLog = require('../models/ActivityLog');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const passport = require('passport'); // ← THÊM DÒNG NÀY
 
 const verifyToken = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
@@ -26,7 +27,6 @@ router.get('/verify', verifyToken, (req, res) => {
 router.post('/refresh', (req, res) => {
   const refreshToken = req.body.refreshToken;
   if (!refreshToken) return res.status(401).json({ message: 'Không có refresh token' });
-
   try {
     const decoded = jwt.verify(refreshToken, process.env.SECRET_KEY);
     const newToken = jwt.sign({ id: decoded.id, role: decoded.role }, process.env.SECRET_KEY, { expiresIn: '1h' });
@@ -36,7 +36,7 @@ router.post('/refresh', (req, res) => {
   }
 });
 
-// Route để đăng nhập
+// Route để đăng nhập thường (username + password)
 router.post('/login', async (req, res) => {
   console.log("Login request received:", req.body);
   const { username, password } = req.body;
@@ -47,17 +47,14 @@ router.post('/login', async (req, res) => {
       console.log("Invalid credentials for:", username);
       return res.status(401).json({ message: 'Thông tin đăng nhập không hợp lệ' });
     }
-
     const token = jwt.sign({ id: user._id, role: user.role }, process.env.SECRET_KEY, { expiresIn: '1h' });
     const refreshToken = jwt.sign({ id: user._id, role: user.role }, process.env.SECRET_KEY, { expiresIn: '7d' });
-
     await new ActivityLog({
       userId: user._id,
       action: 'login',
       ip: req.ip,
       timestamp: new Date(),
     }).save();
-
     res.json({
       token,
       refreshToken,
@@ -78,28 +75,23 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Route để tạo người dùng mới
+// Route để tạo người dùng mới (admin only)
 router.post('/register', verifyToken, async (req, res) => {
   const { username, password, firstName, lastName, email, contact, address1, role } = req.body;
-
   if (!username || !password || !firstName || !lastName || !email || !contact || !address1 || !role) {
     return res.status(400).json({ message: 'Tất cả các trường đều bắt buộc' });
   }
-
   try {
     if (req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền tạo người dùng' });
     }
-
     const existingUser = await User.findOne({
       $or: [{ username }, { email }, { contact }],
     });
     if (existingUser) {
       return res.status(400).json({ message: 'Username, email hoặc số điện thoại đã tồn tại' });
     }
-
     const hashedPassword = await bcrypt.hash(password, 10);
-
     const newUser = new User({
       username,
       password: hashedPassword,
@@ -110,9 +102,7 @@ router.post('/register', verifyToken, async (req, res) => {
       address1,
       role,
     });
-
     const savedUser = await newUser.save();
-
     await new ActivityLog({
       userId: req.user.id,
       action: 'create_user',
@@ -120,7 +110,6 @@ router.post('/register', verifyToken, async (req, res) => {
       ip: req.ip,
       timestamp: new Date(),
     }).save();
-
     res.status(201).json({ message: 'Người dùng đã được tạo thành công', user: savedUser });
   } catch (err) {
     console.error('Lỗi khi tạo người dùng:', err);
@@ -133,7 +122,6 @@ router.get('/users', verifyToken, async (req, res) => {
   try {
     const { search, role, page = 1, limit = 10 } = req.query;
     const query = {};
-
     if (search) {
       query.$or = [
         { username: { $regex: search, $options: 'i' } },
@@ -142,18 +130,15 @@ router.get('/users', verifyToken, async (req, res) => {
         { lastName: { $regex: search, $options: 'i' } },
       ];
     }
-
     if (role && role !== 'all') {
       query.role = role;
     }
-
     const users = await User.find(query)
       .select('username role firstName lastName email contact address1')
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
     const totalUsers = await User.countDocuments(query);
     const totalPages = Math.ceil(totalUsers / limit);
-
     res.json({ users, totalPages });
   } catch (err) {
     console.error('Lỗi khi lấy danh sách người dùng:', err);
@@ -165,21 +150,17 @@ router.get('/users', verifyToken, async (req, res) => {
 router.put('/users/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
   const { firstName, lastName, email, contact, address1, role } = req.body;
-
   if (!firstName || !lastName || !email || !contact || !address1 || !role) {
     return res.status(400).json({ message: 'Tất cả các trường đều bắt buộc' });
   }
-
   try {
     if (req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền sửa người dùng' });
     }
-
     const user = await User.findById(id);
     if (!user) {
       return res.status(404).json({ message: 'Người dùng không tồn tại' });
     }
-
     user.firstName = firstName;
     user.lastName = lastName;
     user.email = email;
@@ -187,9 +168,7 @@ router.put('/users/:id', verifyToken, async (req, res) => {
     user.address1 = address1;
     user.role = role;
     user.updatedAt = new Date();
-
     const updatedUser = await user.save();
-
     await new ActivityLog({
       userId: req.user.id,
       action: 'update_user',
@@ -197,7 +176,6 @@ router.put('/users/:id', verifyToken, async (req, res) => {
       ip: req.ip,
       timestamp: new Date(),
     }).save();
-
     res.json({ message: 'Người dùng đã được cập nhật thành công', user: updatedUser });
   } catch (err) {
     console.error('Lỗi khi cập nhật người dùng:', err);
@@ -208,23 +186,18 @@ router.put('/users/:id', verifyToken, async (req, res) => {
 // Route để xóa người dùng
 router.delete('/users/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
-
   try {
     if (req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền xóa người dùng' });
     }
-
     const user = await User.findById(id);
     if (!user) {
       return res.status(404).json({ message: 'Người dùng không tồn tại' });
     }
-
     if (user.role === 'admin') {
       return res.status(403).json({ message: 'Không thể xóa tài khoản admin' });
     }
-
     await User.findByIdAndDelete(id);
-
     await new ActivityLog({
       userId: req.user.id,
       action: 'delete_user',
@@ -232,12 +205,75 @@ router.delete('/users/:id', verifyToken, async (req, res) => {
       ip: req.ip,
       timestamp: new Date(),
     }).save();
-
     res.json({ message: 'Người dùng đã được xóa thành công' });
   } catch (err) {
     console.error('Lỗi khi xóa người dùng:', err);
     res.status(500).json({ message: 'Không thể xóa người dùng!', error: err.message });
   }
+});
+
+// ================== GOOGLE OAUTH ROUTES (THÊM MỚI) ==================
+
+// Bắt đầu flow đăng nhập Google
+router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+
+// Callback từ Google sau khi user đồng ý
+router.get(
+  '/google/callback',
+  passport.authenticate('google', {
+    failureRedirect: '/api/auth/login-failed', // có thể frontend xử lý
+    session: false, // chúng ta dùng JWT, không cần lưu session
+  }),
+  async (req, res) => {
+    try {
+      const user = req.user; // user đã được passport tạo/đăng nhập
+
+      const token = jwt.sign(
+        { id: user._id, role: user.role },
+        process.env.SECRET_KEY,
+        { expiresIn: '1h' }
+      );
+
+      const refreshToken = jwt.sign(
+        { id: user._id, role: user.role },
+        process.env.SECRET_KEY,
+        { expiresIn: '7d' }
+      );
+
+      // Ghi log
+      await new ActivityLog({
+        userId: user._id,
+        action: 'login_google',
+        ip: req.ip,
+        timestamp: new Date(),
+      }).save();
+
+      // Trả về dữ liệu giống hệt route /login thường để frontend dùng chung code
+      res.json({
+        token,
+        refreshToken,
+        user: {
+          id: user._id,
+          username: user.username,
+          role: user.role,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          contact: user.contact,
+          address1: user.address1,
+          avatar: user.avatar || null,
+        },
+      });
+    } catch (err) {
+      console.error('Lỗi Google callback:', err);
+      res.status(500).json({ message: 'Đăng nhập Google thất bại' });
+    }
+  }
+);
+
+// Route phụ (tùy chọn) nếu login Google fail
+router.get('/login-failed', (req, res) => {
+  res.status(401).json({ message: 'Đăng nhập Google thất bại' });
 });
 
 module.exports = router;
