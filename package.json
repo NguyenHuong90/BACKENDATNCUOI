@@ -13,9 +13,10 @@
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.2",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-rate-limit": "^8.1.0",
+    "express-session": "^1.18.0",
     "firebase-admin": "^13.6.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
@@ -23,7 +24,6 @@
     "mqtt": "^5.14.1",
     "node-schedule": "^2.1.1",
     "passport": "^0.7.0",
-    "passport-google-oauth20": "^2.0.0",
-    "express-session": "^1.18.0"
+    "passport-google-oauth20": "^2.0.0"
   }
 }

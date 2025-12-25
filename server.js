@@ -1,13 +1,10 @@
 const express = require("express");
 const mongoose = require("mongoose");
-const cors = require("cors");
+const cors = require("cors");           // ← Giữ lại để dùng
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const dotenv = require("dotenv");
 const bcrypt = require("bcryptjs");
-const session = require("express-session"); // ← THÊM: cho Passport session
-const passport = require("./src/config/passport"); // ← THÊM: config Passport Google
-
 const User = require("./src/models/User");
 
 dotenv.config();
@@ -20,17 +17,17 @@ if (!process.env.SECRET_KEY) {
 
 const app = express();
 
-// Middleware logging
+// Middleware logging (giữ lại để thấy log đẹp)
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - ${req.ip}`);
   next();
 });
 
-// CORS mở hoàn toàn (giữ nguyên như bạn đang dùng)
+// ĐÃ SỬA: MỞ HOÀN TOÀN CORS → CHO PHÉP VERCEL, LOCALHOST, ĐIỆN THOẠI, MỌI NƠI KẾT NỐI
 app.use(cors());
 console.log("CORS: ĐÃ MỞ HOÀN TOÀN → localhost + Vercel + mọi domain đều được phép!");
 
-// Helmet bảo mật
+// Cấu hình Helmet (giữ nguyên bảo mật)
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -45,26 +42,7 @@ app.use(helmet({
 
 app.use(express.json());
 
-// ===== THÊM SESSION VÀ PASSPORT (CHO GOOGLE LOGIN) =====
-app.use(
-  session({
-    secret: process.env.SECRET_KEY || "fallback_secret_key",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === "production", // true trên Render (HTTPS)
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000, // 1 ngày
-    },
-  })
-);
-
-// Khởi tạo Passport
-app.use(passport.initialize());
-app.use(passport.session());
-// ===== KẾT THÚC PHẦN THÊM =====
-
-// Rate limit riêng cho đăng nhập thường
+// Rate limit riêng cho đăng nhập (giữ nguyên)
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 phút
   max: 5,
@@ -72,14 +50,16 @@ const loginLimiter = rateLimit({
 });
 app.use("/api/auth/login", loginLimiter);
 
-// Rate limit chung
+// Rate limit chung (đã tăng max cho dev)
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000000000,
   message: "Quá nhiều yêu cầu, vui lòng thử lại sau 15 phút.",
 }));
 
-// Kết nối MongoDB
+// XÓA HẾT ĐOẠN XỬ LÝ LỖI CORS CŨ (không cần nữa vì đã mở hoàn toàn)
+// (đoạn app.use((err, req, res, next) => { if (err.message === "Not allowed by CORS")... }) → XÓA HOẶC COMMENT
+
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URL || "mongodb://localhost:27017/lamp_control", {
@@ -129,7 +109,7 @@ const createDefaultAdmin = async () => {
 
 connectDB();
 
-// Load và mount các router (giữ nguyên hoàn toàn)
+// Kiểm tra và log các router
 try {
   const authRouter = require("./src/routes/auth");
   const lampRouter = require("./src/routes/lamp");
@@ -159,13 +139,11 @@ try {
   process.exit(1);
 }
 
-// Middleware xử lý lỗi chung
+// Middleware xử lý lỗi chung (giữ nguyên)
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: "Có lỗi xảy ra trên server." });
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
