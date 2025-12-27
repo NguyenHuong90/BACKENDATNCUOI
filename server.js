@@ -1,13 +1,14 @@
+const dotenv = require("dotenv");  // ← THÊM DÒNG NÀY (QUAN TRỌNG)
 const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");           // ← Giữ lại để dùng
+const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
-const dotenv = require("dotenv");
 const bcrypt = require("bcryptjs");
+const mongoose = require("mongoose");  // ← Cũng đã có từ lần trước
+
 const User = require("./src/models/User");
 
-dotenv.config();
+dotenv.config();  // Bây giờ mới được gọi đúng
 
 // Kiểm tra SECRET_KEY
 if (!process.env.SECRET_KEY) {
@@ -17,17 +18,17 @@ if (!process.env.SECRET_KEY) {
 
 const app = express();
 
-// Middleware logging (giữ lại để thấy log đẹp)
+// Middleware logging
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - ${req.ip}`);
   next();
 });
 
-// ĐÃ SỬA: MỞ HOÀN TOÀN CORS → CHO PHÉP VERCEL, LOCALHOST, ĐIỆN THOẠI, MỌI NƠI KẾT NỐI
+// CORS mở hoàn toàn
 app.use(cors());
 console.log("CORS: ĐÃ MỞ HOÀN TOÀN → localhost + Vercel + mọi domain đều được phép!");
 
-// Cấu hình Helmet (giữ nguyên bảo mật)
+// Bảo mật
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -42,24 +43,21 @@ app.use(helmet({
 
 app.use(express.json());
 
-// Rate limit riêng cho đăng nhập (giữ nguyên)
+// Rate limit
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 phút
+  windowMs: 15 * 60 * 1000,
   max: 5,
   message: "Quá nhiều yêu cầu đăng nhập, vui lòng thử lại sau 15 phút.",
 });
 app.use("/api/auth/login", loginLimiter);
 
-// Rate limit chung (đã tăng max cho dev)
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000000000,
   message: "Quá nhiều yêu cầu, vui lòng thử lại sau 15 phút.",
 }));
 
-// XÓA HẾT ĐOẠN XỬ LÝ LỖI CORS CŨ (không cần nữa vì đã mở hoàn toàn)
-// (đoạn app.use((err, req, res, next) => { if (err.message === "Not allowed by CORS")... }) → XÓA HOẶC COMMENT
-
+// Kết nối MongoDB
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URL || "mongodb://localhost:27017/lamp_control", {
@@ -109,7 +107,7 @@ const createDefaultAdmin = async () => {
 
 connectDB();
 
-// Kiểm tra và log các router
+// Load routers
 try {
   const authRouter = require("./src/routes/auth");
   const lampRouter = require("./src/routes/lamp");
@@ -121,15 +119,6 @@ try {
   console.log("Schedule router type:", typeof scheduleRouter);
   console.log("ActivityLog router type:", typeof activityLogRouter);
 
-  if (
-    typeof authRouter !== "function" ||
-    typeof lampRouter !== "function" ||
-    typeof scheduleRouter !== "function" ||
-    typeof activityLogRouter !== "function"
-  ) {
-    throw new Error("One or more routers are not functions");
-  }
-
   app.use("/api/auth", authRouter);
   app.use("/api/lamp", lampRouter);
   app.use("/api/schedule", scheduleRouter);
@@ -139,7 +128,7 @@ try {
   process.exit(1);
 }
 
-// Middleware xử lý lỗi chung (giữ nguyên)
+// Xử lý lỗi chung
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: "Có lỗi xảy ra trên server." });
