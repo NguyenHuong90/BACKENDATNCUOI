@@ -1,19 +1,23 @@
-const mongoose = require("mongoose");
+const mongoose = require("mongoose");  // ← BẮT BUỘC PHẢI CÓ DÒNG NÀY
 
 const activityLogSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false },
   action: { type: String, required: true },
   details: {
-    startTime: { type: Date }, // Thời gian bắt đầu (nếu có)
-    endTime: { type: Date }, // Thời gian kết thúc (nếu có)
-    lampDim: { type: Number, min: 0, max: 100 }, // Độ sáng (%)
-    lux: { type: Number }, // Ánh sáng (lux)
-    currentA: { type: Number }, // Dòng điện (A)
-    nodeId: { type: String }, // ID bóng đèn
-    gwId: { type: String }, // ID gateway
-    energyConsumed: { type: Number, default: 0 }, // Năng lượng tiêu thụ (kWh)
+    startTime: { type: Date },
+    endTime: { type: Date },
+    lampDim: { type: Number, min: 0, max: 100 },
+    lux: { type: Number },
+    currentA: { type: Number },
+    nodeId: { type: String },
+    gwId: { type: String },
+    energyConsumed: { type: Number, default: 0 },
   },
-  source: { type: String, enum: ["manual", "schedule", "auto"], default: "manual" }, // Nguồn hành động
+  source: { 
+    type: String, 
+    enum: ["manual", "schedule", "auto", "node"], 
+    default: "manual" 
+  },
   ip: { type: String },
   timestamp: { type: Date, default: Date.now },
 });
