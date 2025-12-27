@@ -5,19 +5,19 @@ const ActivityLog = require("../models/ActivityLog");
 const jwt = require("jsonwebtoken");
 const mqtt = require("mqtt");
 
-// Kết nối MQTT
+// Kết nối tới MQTT broker
 const mqttClient = mqtt.connect("mqtt://broker.hivemq.com:1883");
 
 mqttClient.on("connect", () => {
   console.log("Đã kết nối tới MQTT broker");
-  mqttClient.subscribe("lamp/state/#");
+  mqttClient.subscribe("lamp/state/#"); // Subscribe để nhận report từ Node
 });
 
 mqttClient.on("error", (err) => {
   console.error("Lỗi MQTT:", err);
 });
 
-// XỬ LÝ REPORT TỪ NODE (tự động, không có user)
+// === XỬ LÝ REPORT TỪ NODE (tự động, không có user) ===
 mqttClient.on("message", async (topic, message) => {
   if (topic.startsWith("lamp/state/")) {
     const node_id = topic.split("/")[2];
@@ -46,7 +46,7 @@ mqttClient.on("message", async (topic, message) => {
       }
       await lamp.save();
 
-      // Lưu log hoạt động từ Node (source: "node", không có userId)
+      // Lưu log từ Node (không có userId)
       await new ActivityLog({
         action: "node_report",
         details: {
@@ -56,11 +56,11 @@ mqttClient.on("message", async (topic, message) => {
           nodeId: node_id,
           gwId: "gw-01",
         },
-        source: "node",
+        source: "node", // Phân biệt nguồn từ Node
         timestamp: new Date(),
       }).save();
 
-      console.log(`Đã lưu report + log từ Node ${node_id} thành công!`);
+      console.log(`Đã lưu report từ Node ${node_id} vào DB`);
     } catch (err) {
       console.error("Lỗi xử lý report từ Node:", err);
     }
@@ -116,6 +116,7 @@ router.post("/control", verifyToken, async (req, res) => {
       return res.status(400).json({ message: "Thiếu gw_id hoặc node_id" });
     }
 
+    // Kiểm tra lat/lng
     if (lat !== undefined && (isNaN(lat) || lat < -90 || lat > 90)) {
       return res.status(400).json({ message: "Vĩ độ không hợp lệ" });
     }
@@ -146,6 +147,7 @@ router.post("/control", verifyToken, async (req, res) => {
       lamp.lat = lat !== undefined ? lat : lamp.lat;
       lamp.lng = lng !== undefined ? lng : lamp.lng;
 
+      // Tính năng lượng khi tắt đèn
       if (lamp_state === "OFF" && lamp.current_a > 0) {
         const prevLog = await ActivityLog.findOne({
           "details.nodeId": node_id,
@@ -158,7 +160,7 @@ router.post("/control", verifyToken, async (req, res) => {
           const startTime = new Date(prevLog.timestamp);
           const endTime = new Date();
           const durationHours = (endTime - startTime) / (1000 * 60 * 60);
-          const power = lamp.current_a * 220;
+          const power = lamp.current_a * 220; // 220V
           const energy = (power * durationHours * (lamp.lamp_dim / 100)) / 1000;
           lamp.energy_consumed += energy;
         }
@@ -170,7 +172,7 @@ router.post("/control", verifyToken, async (req, res) => {
     await lamp.save();
     console.log("Cập nhật trạng thái đèn:", lamp);
 
-    // Gửi lệnh qua MQTT
+    // Gửi lệnh qua MQTT đến Node
     const payload = JSON.stringify({
       lamp_state: lamp.lamp_state,
       lamp_dim: lamp.lamp_dim,
@@ -181,7 +183,7 @@ router.post("/control", verifyToken, async (req, res) => {
       else console.log(`Đã gửi MQTT tới ${topic}: ${payload}`);
     });
 
-    // Lưu log từ người dùng (có userId)
+    // Lưu log hoạt động từ người dùng (có userId)
     await new ActivityLog({
       userId: req.user.id,
       action:
