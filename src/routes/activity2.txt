@@ -18,69 +18,28 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// LẤY DANH SÁCH NHẬT KÝ - ĐÃ HỖ TRỢ LỌC THEO NHÓM (group)
+// Lấy danh sách nhật ký hoạt động
 router.get("/", verifyToken, async (req, res) => {
   try {
-    console.log("GET /api/activitylog received", req.query);
-
-    let { page = 1, limit = 10, group, startDate, endDate } = req.query;
-
-    page = parseInt(page);
-    limit = parseInt(limit);
-
+    console.log("GET /api/activitylog received");
+    const { userId, action, startDate, endDate, source, page = 1, limit = 10 } = req.query;
     const query = {};
 
-    // === LỌC THEO NHÓM ===
-    if (group && group !== "all") {
-      switch (group) {
-        case "auth":
-          query.action = "login";
-          break;
-        case "lamp":
-          query.action = {
-            $in: [
-              "set_lamp_on",
-              "set_lamp_off",
-              /^set_lamp_brightness_to_/, // Bắt tất cả set_lamp_brightness_to_XX%
-            ],
-          };
-          break;
-        case "schedule":
-          query.action = {
-            $regex: "schedule",
-            $options: "i",
-          };
-          break;
-        case "user":
-          query.action = {
-            $regex: "^(create_user|update_user|delete_user|clear_activity_log|delete_activity_log)",
-            $options: "i",
-          };
-          break;
-        case "node":
-          query.action = "node_report";
-          break;
-        default:
-          break;
-      }
-    }
-
-    // === LỌC THEO NGÀY ===
-    if (startDate) {
-      query.timestamp = { ...query.timestamp, $gte: new Date(startDate) };
-    }
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      query.timestamp = { ...query.timestamp, $lte: end };
+    if (userId) query.userId = userId;
+    if (action) query.action = { $regex: action, $options: "i" };
+    if (source) query.source = source;
+    if (startDate && endDate) {
+      query.timestamp = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate).setHours(23, 59, 59, 999),
+      };
     }
 
     const logs = await ActivityLog.find(query)
       .populate("userId", "username firstName lastName")
       .skip((page - 1) * limit)
-      .limit(limit)
+      .limit(parseInt(limit))
       .sort({ timestamp: -1 });
-
     const totalLogs = await ActivityLog.countDocuments(query);
     const totalPages = Math.ceil(totalLogs / limit);
 
@@ -102,7 +61,7 @@ router.post("/", verifyToken, async (req, res) => {
     }
 
     const log = new ActivityLog({
-      userId: userId || null,
+      userId: userId || null, // Cho phép userId là null cho hành động lịch trình
       action,
       details: {
         startTime: details?.startTime ? new Date(details.startTime) : null,
@@ -112,7 +71,7 @@ router.post("/", verifyToken, async (req, res) => {
         currentA: details?.currentA,
         nodeId: details?.nodeId,
         gwId: details?.gwId,
-        energyConsumed: details?.energyConsumed || 0,
+        energyConsumed: details?.energyConsumed || 0, // Lấy energyConsumed từ details
       },
       source,
       ip: ip || req.ip,
